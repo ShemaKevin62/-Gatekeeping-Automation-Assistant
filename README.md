@@ -217,6 +217,31 @@ Web dashboard (Power BI or Excel Online)
 -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
 Option Explicit
+' =============================================================================
+' CREDIT LIMIT REDUCTION ASSISTANT (LOC / FlexLine / HELOC FlexLine)
+' Buttons:
+'   GenerateEmail     -> builds a reviewable Outlook email
+'   GenerateDocument  -> builds a Word doc (uses template if present)
+'   GenerateBoth      -> does both (fixed version)
+'
+' Control sheet (as per your screenshot):
+'   Control!E4 = OPC Number
+'   Control!E5 = Name
+'   Control!E6 = Province
+'   Control!E7 = Product (e.g., "Joint LOC", "Joint Heloc", "Joint Flexline")
+'
+' Optional named ranges (take priority if present): OPC_Number, Client_Name,
+'   Province, ProductChoice
+'
+' Optional Word template path (relative to workbook):
+'   \Templates\LimitReductionTemplate.docx
+'   Bookmarks expected: OPC, ClientName, Province, Product, IsJoint,
+'   TotalOS, AvailCredit, CreditLimit, PlanLimit, RevolvingOS, TermSum,
+'   ProposedLimit, Reduction, RunDate
+'
+' Output docs saved to: \Output\YYYYMMDD_<OPC>_<Product>.docx
+' =============================================================================
+
 
 '=========================
 '  PUBLIC BUTTON MACROS
@@ -226,15 +251,18 @@ Public Sub GenerateEmail()
     If Not LoadUI(ui, productBase, isJoint) Then Exit Sub
 
     Dim rules As ProductRule: rules = GetProductRule(productBase)
+
     Dim info As HostInfo
     If Not ReadHostFields(info) Then
-        MsgBox "Couldn't read required fields from Host screen.", vbCritical: Exit Sub
+        MsgBox "Couldn't read required fields from Host screen.", vbCritical
+        Exit Sub
     End If
 
     Dim rec As Recommendation
     rec = CalculateRecommendation(productBase, info, rules)
     If Not rec.IsReductionPossible Then
-        MsgBox "No reduction possible under current rules (new limit ≥ current limit).", vbInformation: Exit Sub
+        MsgBox "No reduction possible under current rules (new limit ≥ current limit).", vbInformation
+        Exit Sub
     End If
 
     BuildOutlookEmail BuildProductLabel(productBase, isJoint), info, rules, rec, ui
@@ -245,15 +273,18 @@ Public Sub GenerateDocument()
     If Not LoadUI(ui, productBase, isJoint) Then Exit Sub
 
     Dim rules As ProductRule: rules = GetProductRule(productBase)
+
     Dim info As HostInfo
     If Not ReadHostFields(info) Then
-        MsgBox "Couldn't read required fields from Host screen.", vbCritical: Exit Sub
+        MsgBox "Couldn't read required fields from Host screen.", vbCritical
+        Exit Sub
     End If
 
     Dim rec As Recommendation
     rec = CalculateRecommendation(productBase, info, rules)
     If Not rec.IsReductionPossible Then
-        MsgBox "No reduction possible under current rules (new limit ≥ current limit).", vbInformation: Exit Sub
+        MsgBox "No reduction possible under current rules (new limit ≥ current limit).", vbInformation
+        Exit Sub
     End If
 
     BuildWordDocument BuildProductLabel(productBase, isJoint), isJoint, info, rules, rec, ui
@@ -263,6 +294,7 @@ Public Sub GenerateBoth()
     GenerateDocument
     GenerateEmail
 End Sub
+
 
 '=========================
 '   UI / CONFIG HELPERS
@@ -275,14 +307,14 @@ Private Type UIInfo
 End Type
 
 Private Function LoadUI(ByRef ui As UIInfo, ByRef productBase As String, ByRef isJoint As Boolean) As Boolean
-    ' Tries named ranges first; falls back to Control!E4:E7 (as in your screenshot)
+    ' Try named ranges first; fall back to Control!E4:E7
     ui.OPC = NzS(GetCellValuePreferNames(Array("OPC_Number"), "Control", "E4"))
     ui.ClientName = NzS(GetCellValuePreferNames(Array("Client_Name"), "Control", "E5"))
     ui.Province = NzS(GetCellValuePreferNames(Array("Province"), "Control", "E6"))
     ui.ProductRaw = NzS(GetCellValuePreferNames(Array("ProductChoice"), "Control", "E7"))
 
     If Len(ui.ProductRaw) = 0 Then
-        MsgBox "Choose a product in the dropdown (e.g., Joint LOC / Joint Heloc / Joint Flexline).", vbExclamation
+        MsgBox "Choose a product (e.g., Joint LOC / Joint Heloc / Joint Flexline).", vbExclamation
         Exit Function
     End If
 
@@ -317,7 +349,7 @@ Private Function BuildProductLabel(ByVal baseName As String, ByVal isJoint As Bo
     End If
 End Function
 
-' One-time config creator (unchanged defaults; tweak in sheet)
+' Creates/refreshes the configuration sheet
 Public Sub SetupConfig()
     Dim ws As Worksheet
     If Not SheetExists("LimitConfig") Then
@@ -363,6 +395,7 @@ Private Function GetProductRule(ByVal productName As String) As ProductRule
     Next r
     Err.Raise vbObjectError + 3001, , "No matching Product in LimitConfig for '" & productName & "'."
 End Function
+
 
 '=========================
 '  IBM HOST SCREEN READ
@@ -414,6 +447,7 @@ Private Function ReadHostFields(ByRef info As HostInfo) As Boolean
     info.RevolvingBalance = ToAmount(ps.GetText(RREV_R, RREV_C1, RREV_C2 - RREV_C1 + 1))
 
     Dim r As Integer, s As String, amt As Double, idx As Integer
+    idx = 0
     ReDim info.TermPortions(1 To (TPORT_RN - TPORT_R1 + 1))
     For r = TPORT_R1 To TPORT_RN
         s = ps.GetText(r, TPORT_C1, TPORT_C2 - TPORT_C1 + 1)
@@ -428,6 +462,7 @@ Private Function ReadHostFields(ByRef info As HostInfo) As Boolean
 fail:
     ReadHostFields = False
 End Function
+
 
 '=========================
 '   CALC RECOMMENDER
@@ -471,6 +506,7 @@ Private Function CalculateRecommendation(ByVal productName As String, ByRef info
     End With
 End Function
 
+
 '=========================
 '   OUTLOOK EMAIL
 '=========================
@@ -491,7 +527,7 @@ Private Sub BuildOutlookEmail(ByVal productLabel As String, ByRef info As HostIn
     body = body & "   • Available Credit: " & Fmt(info.AvailableCredit) & vbCrLf
     body = body & "   • Credit Limit:     " & Fmt(info.CreditLimit) & vbCrLf
     If info.PlanLimit > 0 Then body = body & "   • Plan Limit:       " & Fmt(info.PlanLimit) & vbCrLf
-    If UCase$(productLabel) <> "LOC" And InStr(1, productLabel, "LOC", vbTextCompare) = 0 Then
+    If InStr(1, UCase$(productLabel), "FLEX") > 0 Or InStr(1, UCase$(productLabel), "HELOC") > 0 Then
         body = body & "   • Revolving O/S:    " & Fmt(info.RevolvingBalance) & vbCrLf
         body = body & "   • Term Portions Σ:  " & Fmt(info.TermSum) & vbCrLf
     End If
@@ -501,12 +537,13 @@ Private Sub BuildOutlookEmail(ByVal productLabel As String, ByRef info As HostIn
     body = body & "   • Cushion Amount:   " & Fmt(rules.CushionAmount) & vbCrLf
     body = body & "   • Cushion Percent:  " & FormatPercent(rules.CushionPercent, 2) & vbCrLf
     body = body & "   • Round Step:       $" & FormatNumber(rules.RoundStep, 0) & vbCrLf
-    If UCase$(productLabel) <> "LOC" And InStr(1, productLabel, "LOC", vbTextCompare) = 0 Then _
+    If InStr(1, UCase$(productLabel), "FLEX") > 0 Or InStr(1, UCase$(productLabel), "HELOC") > 0 Then
         body = body & "   • Min Revolving:    " & Fmt(rules.MinRevolving) & vbCrLf
+    End If
     body = body & vbCrLf
 
     body = body & "— Computation —" & vbCrLf
-    If InStr(1, UCase$(productLabel), "LOC") > 0 And InStr(1, UCase$(productLabel), "FLEX") = 0 Then
+    If InStr(1, UCase$(productLabel), "FLEX") = 0 And InStr(1, UCase$(productLabel), "HELOC") = 0 Then
         body = body & "   • Proposed Limit:   " & Fmt(rec.NewLimit) & vbCrLf
     Else
         body = body & "   • Revolving Target: " & Fmt(rec.RevolvingTarget) & vbCrLf
@@ -524,6 +561,7 @@ Private Sub BuildOutlookEmail(ByVal productLabel As String, ByRef info As HostIn
         .Display
     End With
 End Sub
+
 
 '=========================
 '   WORD DOC GENERATION
@@ -544,6 +582,8 @@ Private Sub BuildWordDocument(ByVal productLabel As String, ByVal isJoint As Boo
     If Dir(templatePath, vbNormal) <> "" Then
         Set doc = wd.Documents.Open(templatePath, ReadOnly:=True)
         doc.SaveAs2 outPath
+
+        ' Fill bookmarks (using robust re-add pattern)
         FillBM doc, "OPC", ui.OPC
         FillBM doc, "ClientName", ui.ClientName
         FillBM doc, "Province", ui.Province
@@ -558,6 +598,9 @@ Private Sub BuildWordDocument(ByVal productLabel As String, ByVal isJoint As Boo
         FillBM doc, "ProposedLimit", Fmt(rec.NewLimit)
         FillBM doc, "Reduction", Fmt(rec.Reduction)
         FillBM doc, "RunDate", Format(Now, "yyyy-mm-dd")
+
+        doc.Save
+
     Else
         ' No template: build a clean doc with a table
         Set doc = wd.Documents.Add
@@ -597,8 +640,10 @@ End Sub
 Private Sub FillBM(ByVal doc As Object, ByVal name As String, ByVal textVal As String)
     On Error Resume Next
     If doc.Bookmarks.Exists(name) Then
-        doc.Bookmarks(name).Range.Text = textVal
-        doc.Bookmarks.Add name, doc.Bookmarks(name).Range
+        Dim rng As Object
+        Set rng = doc.Bookmarks(name).Range
+        rng.Text = textVal
+        doc.Bookmarks.Add name, rng
     End If
     On Error GoTo 0
 End Sub
@@ -607,6 +652,7 @@ Private Sub PutKV(ByRef tbl As Object, ByVal row As Long, ByVal key As String, B
     tbl.Cell(row, 1).Range.Text = key
     tbl.Cell(row, 2).Range.Text = val
 End Sub
+
 
 '=========================
 '        UTILITIES
@@ -653,6 +699,7 @@ End Function
 
 Private Function RoundUpTo(ByVal value As Double, ByVal stepSize As Double) As Double
     If stepSize <= 0 Then stepSize = 100
+    ' Use Excel's CEILING.PRECISE via WorksheetFunction
     RoundUpTo = stepSize * WorksheetFunction.Ceiling_Precise(value / stepSize, 1)
 End Function
 
@@ -674,7 +721,13 @@ Private Function GetCellValuePreferNames(possibleNames As Variant, ByVal fallbac
     Dim nm As Variant
     For Each nm In possibleNames
         On Error Resume Next
-        GetCellValuePreferNames = Evaluate(nm)
+        GetCellValuePreferNames = Range(CStr(nm)).Value
+        If Err.Number = 0 Then
+            On Error GoTo 0
+            Exit Function
+        End If
+        Err.Clear
+        GetCellValuePreferNames = Evaluate(CStr(nm))
         If Err.Number = 0 And Not IsEmpty(GetCellValuePreferNames) Then
             On Error GoTo 0
             Exit Function
@@ -683,5 +736,3 @@ Private Function GetCellValuePreferNames(possibleNames As Variant, ByVal fallbac
     Next nm
     GetCellValuePreferNames = Worksheets(fallbackSheet).Range(fallbackAddr).Value
 End Function
-
-
